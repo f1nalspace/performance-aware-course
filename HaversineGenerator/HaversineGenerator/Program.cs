@@ -1,12 +1,8 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.IO;
-using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Final.PerformanceAwareCourse
