@@ -101,59 +101,74 @@ namespace Final.PerformanceAwareCourse
 
             Directory.CreateDirectory(outputDirectory);
 
-            string pairsFilePath = Path.Combine(outputDirectory, "pairs.json");
+            string pairsFilePath = Path.Combine(outputDirectory, $"data_{pairCount}.json");
 
-            double sum = 0.0;
+            string resultsFilePath = Path.Combine(outputDirectory, $"data_{pairCount}.results");
+
+            double avg = 0.0;
             double sumCoef = 1.0 / (double)pairCount;
 
-            using (FileStream stream = File.Create(pairsFilePath))
+            using FileStream resultsStream = File.Create(resultsFilePath);
+            using BinaryWriter resultsWriter = new BinaryWriter(resultsStream, Encoding.ASCII, leaveOpen: true);
+
+            resultsWriter.Write(pairCount);
+
+            using FileStream pairsStream = File.Create(pairsFilePath);
+            using StreamWriter pairsWriter = new StreamWriter(pairsStream, Encoding.ASCII, leaveOpen: true);
+
+            pairsWriter.WriteLine("{");
+            pairsWriter.WriteLine("\"pairs\": [");
+
+            for (ulong pairIndex = 0; pairIndex < pairCount; ++pairIndex)
             {
-                using (StreamWriter writer = new StreamWriter(stream, Encoding.ASCII, leaveOpen: true))
+                // Change center and radius of cluster
+                if (clusterCountLeft-- == 0)
                 {
-                    writer.WriteLine("{");
-                    writer.WriteLine("\"pairs\": [");
-
-                    for (ulong pairIndex = 0; pairIndex < pairCount; ++pairIndex)
-                    {
-                        // Change center and radius of cluster
-                        if (clusterCountLeft-- == 0)
-                        {
-                            clusterCountLeft = clusterCountMax;
-                            xCenter = RandomRange(rnd, -xRange, xRange);
-                            yCenter = RandomRange(rnd, -yRange, yRange);
-                            xRadius = RandomRange(rnd, 0, xRange);
-                            yRadius = RandomRange(rnd, 0, yRange);
-                        }
-
-                        double x0 = RandomDegree(rnd, xCenter, xRadius, xRange);
-                        double y0 = RandomDegree(rnd, yCenter, yRadius, yRange);
-                        double x1 = RandomDegree(rnd, xCenter, xRadius, xRange);
-                        double y1 = RandomDegree(rnd, yCenter, yRadius, yRange);
-
-                        double haversineDistance = HaversineDistance(x0, y0, x1, y1, EarthRadius);
-
-                        string separator = pairIndex < pairCount - 1 ? "," : "";
-
-                        writer.WriteLine(FormattableString.Invariant($"{{\"x0\": {x0:F16}, \"y0\": {y0:F16}, \"x1\": {x1:F16}, \"y1\": {y1:F16}}}{separator}"));
-
-                        sum += haversineDistance * sumCoef;
-                    }
-
-                    writer.WriteLine("],");
-
-                    writer.WriteLine(FormattableString.Invariant($"\"sum\": {sum:F16},"));
-
-                    writer.WriteLine(FormattableString.Invariant($"\"count\": {pairCount}"));
-
-                    writer.WriteLine("}");
+                    clusterCountLeft = clusterCountMax;
+                    xCenter = RandomRange(rnd, -xRange, xRange);
+                    yCenter = RandomRange(rnd, -yRange, yRange);
+                    xRadius = RandomRange(rnd, 0, xRange);
+                    yRadius = RandomRange(rnd, 0, yRange);
                 }
+
+                double x0 = RandomDegree(rnd, xCenter, xRadius, xRange);
+                double y0 = RandomDegree(rnd, yCenter, yRadius, yRange);
+                double x1 = RandomDegree(rnd, xCenter, xRadius, xRange);
+                double y1 = RandomDegree(rnd, yCenter, yRadius, yRange);
+
+                double haversineDistance = HaversineDistance(x0, y0, x1, y1, EarthRadius);
+
+                string separator = pairIndex < pairCount - 1 ? "," : "";
+
+                pairsWriter.WriteLine(FormattableString.Invariant($"{{\"x0\": {x0:F16}, \"y0\": {y0:F16}, \"x1\": {x1:F16}, \"y1\": {y1:F16}}}{separator}"));
+
+                resultsWriter.Write(x0);
+                resultsWriter.Write(y0);
+                resultsWriter.Write(x1);
+                resultsWriter.Write(y1);
+                resultsWriter.Write(haversineDistance);
+
+                avg += haversineDistance * sumCoef;
             }
+
+            resultsWriter.Write(avg);
+
+            pairsWriter.WriteLine("],");
+
+            pairsWriter.WriteLine(FormattableString.Invariant($"\"avg\": {avg:F16},"));
+
+            pairsWriter.WriteLine(FormattableString.Invariant($"\"count\": {pairCount}"));
+
+            pairsWriter.WriteLine("}");
+
+            resultsWriter.Flush();
+            pairsWriter.Flush();
 
             Console.WriteLine($"Done");
             Console.WriteLine($"Output-Path: {outputDirectory}");
             Console.WriteLine($"Method: {method}");
             Console.WriteLine($"Seed: {seed} ({seedText})");
-            Console.WriteLine(FormattableString.Invariant($"Expected Sum: {sum:F16}"));
+            Console.WriteLine(FormattableString.Invariant($"Expected Avg: {avg:F16}"));
 
             return 0;
         }
