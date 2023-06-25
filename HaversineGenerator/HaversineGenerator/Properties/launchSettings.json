@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "HaversineGenerator": {
+      "commandName": "Project",
+      "commandLineArgs": "uniform 1337 100000"
+    }
+  }
+}
