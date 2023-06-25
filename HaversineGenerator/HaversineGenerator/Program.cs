@@ -1,48 +1,12 @@
 ﻿using System;
-using System.Diagnostics.Contracts;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json.Serialization;
 
 namespace Final.PerformanceAwareCourse
 {
     internal class Program
     {
-        readonly struct HaversinePair
-        {
-            [JsonPropertyName("x0")]
-            public double X0 { get; }
-            [JsonPropertyName("y0")]
-            public double Y0 { get; }
-            [JsonPropertyName("x1")]
-            public double X1 { get; }
-            [JsonPropertyName("y1")]
-            public double Y1 { get; }
-
-            public HaversinePair(double x0, double y0, double x1, double y1) : this()
-            {
-                X0 = x0;
-                Y0 = y0;
-                X1 = x1;
-                Y1 = y1;
-            }
-
-            public override string ToString() => FormattableString.Invariant($"({X0}, {Y0}) to ({X1}, {Y1})");
-        }
-
-        class HaversineSamples
-        {
-            [JsonPropertyName("pairs")]
-            public HaversinePair[] Pairs { get; set; }
-
-            [JsonPropertyName("distances")]
-            public double[] Distances { get; set; }
-
-            [JsonPropertyName("avg")]
-            public double Avg { get; set; }
-        }
-
         const double Deg2RadFactor = Math.PI / 180.0;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -70,10 +34,6 @@ namespace Final.PerformanceAwareCourse
 
             return result;
         }
-
-        static double HaversineDistance(HaversinePair pair, double radius) => HaversineDistance(pair.X0, pair.Y0, pair.X1, pair.Y1, radius);
-
-        static readonly (HaversinePair Pair, double Result) TestData = (new HaversinePair(51.5007, 0.1246, 40.6892, 74.0445), 8254.1781969571875);
 
         static double RandomRange(Random rnd, double min, double max)
         {
@@ -110,12 +70,6 @@ namespace Final.PerformanceAwareCourse
             {
                 Console.Error.WriteLine($"Invalid count argument! Expect number, but got '{args[2]}'!");
                 return -2;
-            }
-
-            // Test distance computation
-            {
-                double r = HaversineDistance(TestData.Pair, EarthRadius);
-                Contract.Assert(Math.Abs(r - TestData.Result) < double.Epsilon);
             }
 
             Console.WriteLine($"Generating {pairCount} pairs with seed '{seedText}' ({seed})");
