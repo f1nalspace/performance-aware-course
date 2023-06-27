@@ -9,7 +9,7 @@ namespace Final.PerformanceAwareCourse
 
         static int Main(string[] args)
         {
-            ulong startupCyclesStart = Rdtsc.Read();
+            ulong startupCyclesStart = Rdtsc.Get();
 
             if (args.Length < 1)
             {
@@ -25,13 +25,13 @@ namespace Final.PerformanceAwareCourse
                 return -1;
             }
 
-            ulong startupCyclesEnd = Rdtsc.Read();
+            ulong startupCyclesEnd = Rdtsc.Get();
 
             ulong cpuFreq = Rdtsc.EstimateFrequency();
 
-            ulong totalCyclesStart = Rdtsc.Read();
+            ulong totalCyclesStart = Rdtsc.Get();
 
-            ulong readCyclesStart = Rdtsc.Read();
+            ulong readCyclesStart = Rdtsc.Get();
 
             FileInfo inputJsonFile = new FileInfo(inputJsonFilePath);
 
@@ -53,9 +53,9 @@ namespace Final.PerformanceAwareCourse
 
             ReadOnlySpan<byte> data = jsonData.AsSpan();
 
-            ulong readCyclesEnd = Rdtsc.Read();
+            ulong readCyclesEnd = Rdtsc.Get();
 
-            ulong parseCyclesStart = Rdtsc.Read();
+            ulong parseCyclesStart = Rdtsc.Get();
 
             Result<JSONElement> parseRes = JSONParser.Parse(data);
             if (!parseRes.Success)
@@ -64,9 +64,9 @@ namespace Final.PerformanceAwareCourse
                 return -1;
             }
 
-            ulong parseCyclesEnd = Rdtsc.Read();
+            ulong parseCyclesEnd = Rdtsc.Get();
 
-            ulong lookupCyclesStart = Rdtsc.Read();
+            ulong lookupCyclesStart = Rdtsc.Get();
 
             JSONElement root = parseRes.Value;
             if (root.Kind != JSONElementKind.Object)
@@ -118,9 +118,9 @@ namespace Final.PerformanceAwareCourse
                 ++pairIndex;
             }
 
-            ulong lookupCyclesEnd = Rdtsc.Read();
+            ulong lookupCyclesEnd = Rdtsc.Get();
 
-            ulong sumCyclesStart = Rdtsc.Read();
+            ulong sumCyclesStart = Rdtsc.Get();
 
             double avg = 0.0;
             double coeff = 1.0 / (double)pairs.Length;
@@ -130,9 +130,9 @@ namespace Final.PerformanceAwareCourse
                 avg += distance * coeff;
             }
 
-            ulong sumCyclesEnd = Rdtsc.Read();
+            ulong sumCyclesEnd = Rdtsc.Get();
 
-            ulong totalCyclesEnd = Rdtsc.Read();
+            ulong totalCyclesEnd = Rdtsc.Get();
 
             ulong totalCyclesElapsed = totalCyclesEnd - totalCyclesStart;
 
