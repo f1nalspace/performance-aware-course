@@ -1,283 +1,20 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO;
-using System.Text;
 
 namespace Final.PerformanceAwareCourse
 {
     internal class Program
     {
-        readonly struct Error
-        {
-            public string Message { get; }
-
-            public Error(string message)
-            {
-                Message = message;
-            }
-
-            public override string ToString() => Message;
-        }
-
-        readonly struct Result<T>
-        {
-            public T Value { get; }
-            public Error Error { get; }
-            public bool Success { get; }
-
-            public Result(T value)
-            {
-                Error = default;
-                Value = value;
-                Success = true;
-            }
-
-            public Result(Error error)
-            {
-                Error = error;
-                Value = default;
-                Success = false;
-            }
-
-            public static implicit operator Result<T>(T value) => new Result<T>(value);
-            public static implicit operator Result<T>(Error error) => new Result<T>(error);
-        }
-
-        enum JSONTokenKind : int
-        {
-            None = 0,
-            OpenObjectOp,
-            CloseObjectOp,
-            OpenArrayOp,
-            CloseArrayOp,
-            AssignmentOp,
-            SeparatorOp,
-            IntegerLiteral,
-            DecimalLiteral,
-            FalseLiteral,
-            TrueLiteral,
-            NullLiteral,
-            StringLiteral,
-        }
-
-        class JSONToken
-        {
-            public JSONTokenKind Kind { get; }
-            public int Position { get; }
-            public int Length { get; }
-            public string Text { get; internal set; }
-
-            public double NumberLiteral { get; }
-            public string StringLiteral { get; }
-            public char OperatorChar { get; }
-
-
-            public JSONToken(JSONTokenKind kind, int position, char opChar)
-            {
-                Kind = kind;
-                Position = position;
-                Length = 1;
-                OperatorChar = opChar;
-                Text = opChar.ToString();
-            }
-
-            public JSONToken(JSONTokenKind kind, int position, int length, double numberLiteral)
-            {
-                Kind = kind;
-                Position = position;
-                Length = length;
-                NumberLiteral = numberLiteral;
-            }
-
-            public JSONToken(JSONTokenKind kind, int position, int length, string stringLiteral)
-            {
-                Kind = kind;
-                Position = position;
-                Length = length;
-                StringLiteral = stringLiteral;
-            }
-
-            public override string ToString() => $"[Pos: {Position}, Len: {Length}, Kind: {Kind}] '{Text}'";
-        }
-
-        static bool StreamHasData(ReadOnlySpan<byte> stream, int minLen = 1) => stream.Length >= minLen;
-
-        static bool CharIsNumber(byte ch) => ch >= '0' && ch <= '9';
-
-        static bool CharIsWhitespace(byte ch) =>
-            ch == ' ' ||
-            ch == '\t' ||
-            ch == '\b' ||
-            ch == '\f' ||
-            ch == '\r' ||
-            ch == '\n';
-
-        static string GetText(ReadOnlySpan<byte> stream, int len)
-        {
-            if (stream.Length >= len)
-            {
-                ReadOnlySpan<byte> s = stream.Slice(0, len);
-                StringBuilder result = new StringBuilder(len);
-                for (int i = 0; i < s.Length; ++i)
-                    result.Append((char)s[i]);
-                return result.ToString();
-            }
-            return null;
-        }
-
-        static ReadOnlySpan<byte> SkipWhitespaces(ReadOnlySpan<byte> stream)
-        {
-            ReadOnlySpan<byte> cur = stream;
-            while (cur.Length > 0 && CharIsWhitespace(cur[0]))
-                cur = cur.Slice(1);
-            return cur;
-        }
-
-        static Result<JSONToken> GetNumberToken(int position, ReadOnlySpan<byte> stream, bool hasSign)
-        {
-            if (!StreamHasData(stream))
-                return new Error("Stream is empty");
-
-            ReadOnlySpan<byte> cur = stream;
-
-            byte c = cur[0];
-
-            double factor = 1.0;
-            if (hasSign)
-            {
-                Debug.Assert(c == '-' || c == '+');
-                factor = c == '-' ? -1.0 : 1.0;
-                cur = cur.Slice(1);
-            }
-            else
-                Debug.Assert(c >= '0' && c <= '9');
-
-            if (!StreamHasData(cur))
-                return new Error("Stream is empty");
-            if (!CharIsNumber(c = cur[0]))
-                return new Error($"Invalid number literal character '{c}' at position {position}");
-
-            double number = 0;
-            while (StreamHasData(cur) && CharIsNumber(c = cur[0]))
-            {
-                int i = c - '0';
-                number = number * 10.0 + (double)i;
-                cur = cur.Slice(1);
-            }
-
-            JSONTokenKind kind = JSONTokenKind.IntegerLiteral;
-            if (StreamHasData(cur) && (c = cur[0]) == '.')
-            {
-                kind = JSONTokenKind.DecimalLiteral;
-                cur = cur.Slice(1);
-                while (StreamHasData(cur) && CharIsNumber(c = cur[0]))
-                {
-                    int i = c - '0';
-                    factor /= 10.0;
-                    number = number * 10.0 + (double)i;
-                    cur = cur.Slice(1);
-                }
-            }
-
-            int len = stream.Length - cur.Length;
-
-            double numberValue = number * factor;
-
-            return new JSONToken(kind, position, len, numberValue) { Text = GetText(stream, len) };
-        }
-
-        static Result<JSONToken> GetStringToken(int position, ReadOnlySpan<byte> stream)
-        {
-            if (!StreamHasData(stream))
-                return new Error("Stream is empty");
-            Debug.Assert(stream[0] == '"');
-            ReadOnlySpan<byte> cur = stream.Slice(1);
-            byte c = 0;
-            StringBuilder s = new StringBuilder();
-            while (StreamHasData(cur) && (c = cur[0]) != '"')
-            {
-                if (c == '\\')
-                {
-                    cur = cur.Slice(1);
-                    c = cur[0];
-                    char escapeChar = c switch
-                    {
-                        (byte)'b' => '\b',
-                        (byte)'f' => '\f',
-                        (byte)'n' => '\n',
-                        (byte)'r' => '\r',
-                        (byte)'t' => '\t',
-                        (byte)'"' => '"',
-                        (byte)'\\' => '\\',
-                        _ => char.MinValue,
-                    };
-                    if (escapeChar == char.MinValue)
-                        return new Error($"String literal escape character '{c}' is invalid at position {position}");
-                    s.Append(escapeChar);
-                    cur = cur.Slice(1);
-                }
-                else if (CharIsWhitespace(c))
-                    return new Error($"String literal contains invalid whitespace character '{c}' at position {position}");
-                else
-                {
-                    s.Append((char)c);
-                    cur = cur.Slice(1);
-                }
-            }
-            if (c != '"')
-                return new Error($"Expect string literal to end with a double quote, but got character '{c}' at position {position}");
-            cur = cur.Slice(1);
-            int len = stream.Length - cur.Length;
-            return new JSONToken(JSONTokenKind.StringLiteral, position, len, s.ToString()) { Text = GetText(stream, len) };
-        }
-
-        static Result<JSONToken> GetToken(int position, ReadOnlySpan<byte> stream)
-        {
-            if (!StreamHasData(stream))
-                return new Error("Stream is empty");
-            char c = (char)stream[0];
-            switch (c)
-            {
-                case '{':
-                    return new JSONToken(JSONTokenKind.OpenObjectOp, position, c);
-                case '}':
-                    return new JSONToken(JSONTokenKind.CloseObjectOp, position, c);
-                case '[':
-                    return new JSONToken(JSONTokenKind.OpenArrayOp, position, c);
-                case ']':
-                    return new JSONToken(JSONTokenKind.CloseArrayOp, position, c);
-                case ':':
-                    return new JSONToken(JSONTokenKind.AssignmentOp, position, c);
-                case ',':
-                    return new JSONToken(JSONTokenKind.SeparatorOp, position, c);
-                case '"':
-                    return GetStringToken(position, stream);
-                case '0':
-                case '1':
-                case '2':
-                case '3':
-                case '4':
-                case '5':
-                case '6':
-                case '7':
-                case '8':
-                case '9':
-                    return GetNumberToken(position, stream, false);
-                case '-':
-                case '+':
-                    return GetNumberToken(position, stream, true);
-                default:
-                    return new Error($"Invalid character '{c}' at position {position}");
-            }
-        }
+        const int FileBufferSize = 4096 * 16;
 
         static int Main(string[] args)
         {
+            ulong startupCyclesStart = Rdtsc.Read();
+
             if (args.Length < 1)
             {
                 string execPath = Path.GetFileName(Environment.ProcessPath);
                 Console.Error.WriteLine($"Usage: {execPath} [input json file]");
-                Console.Error.WriteLine($"Usage: {execPath} [input json file] [input results file]");
                 return -1;
             }
 
@@ -288,24 +25,17 @@ namespace Final.PerformanceAwareCourse
                 return -1;
             }
 
-            bool createResultsFile;
-            string resultsFilePath = null;
-            if (args.Length >= 2)
-            {
-                resultsFilePath = args[1];
-                createResultsFile = false;
-            }
-            else
-            {
-                resultsFilePath = Path.ChangeExtension(inputJsonFilePath, ".results");
-                createResultsFile = true;
-            }
+            ulong startupCyclesEnd = Rdtsc.Read();
+
+            ulong cpuFreq = Rdtsc.EstimateFrequency();
+
+            ulong totalCyclesStart = Rdtsc.Read();
+
+            ulong readCyclesStart = Rdtsc.Read();
 
             FileInfo inputJsonFile = new FileInfo(inputJsonFilePath);
 
             byte[] jsonData = new byte[inputJsonFile.Length];
-
-            const int bufferSize = 4096 * 16;
 
             int remainingBytes = (int)inputJsonFile.Length;
             int offset = 0;
@@ -314,7 +44,7 @@ namespace Final.PerformanceAwareCourse
             {
                 while (remainingBytes > 0)
                 {
-                    int bytesToRead = Math.Min(remainingBytes, bufferSize);
+                    int bytesToRead = Math.Min(remainingBytes, FileBufferSize);
                     int bytesRead = stream.Read(jsonData, offset, bytesToRead);
                     remainingBytes -= bytesRead;
                     offset += bytesRead;
@@ -323,23 +53,115 @@ namespace Final.PerformanceAwareCourse
 
             ReadOnlySpan<byte> data = jsonData.AsSpan();
 
-            int position = 0;
+            ulong readCyclesEnd = Rdtsc.Read();
 
-            ReadOnlySpan<byte> cur = data;
-            while (StreamHasData(cur))
+            ulong parseCyclesStart = Rdtsc.Read();
+
+            Result<JSONElement> parseRes = JSONParser.Parse(data);
+            if (!parseRes.Success)
             {
-                cur = SkipWhitespaces(cur);
-                if (cur.Length == 0)
-                    break;
-                Result<JSONToken> tokenRes = GetToken(position, cur);
-                if (!tokenRes.Success)
+                Console.Error.WriteLine(parseRes.Error.Message);
+                return -1;
+            }
+
+            ulong parseCyclesEnd = Rdtsc.Read();
+
+            ulong lookupCyclesStart = Rdtsc.Read();
+
+            JSONElement root = parseRes.Value;
+            if (root.Kind != JSONElementKind.Object)
+            {
+                Console.Error.WriteLine($"Expect JSON root kind to be object, but got '{root.Kind}'");
+                return -1;
+            }
+
+            JSONElement pairsNode = root.FindByLabel("pairs");
+            if (pairsNode is null || pairsNode.Kind != JSONElementKind.Array)
+            {
+                Console.Error.WriteLine($"No pairs node found!");
+                return -1;
+            }
+
+            double expectedAvg = 0;
+            JSONElement avgNode = root.FindByLabel("avg");
+            if (avgNode is not null && avgNode.Kind == JSONElementKind.Number)
+                expectedAvg = avgNode.NumberValue;
+
+            long expectedCount = 0;
+            JSONElement countNode = root.FindByLabel("count");
+            if (countNode is not null && countNode.Kind == JSONElementKind.Number)
+                expectedCount = (long)countNode.NumberValue;
+
+            if (expectedCount != pairsNode.ChildCount)
+            {
+                Console.Error.WriteLine(FormattableString.Invariant($"Expect pair count of '{expectedCount}', but got '{pairsNode.ChildCount}'"));
+                return -1;
+            }
+
+            int pairCount = pairsNode.ChildCount;
+
+            HaversinePair[] pairs = new HaversinePair[pairCount];
+
+            long pairIndex = 0;
+            foreach (JSONElement pairChild in pairsNode.Children)
+            {
+                JSONElement x0 = pairChild.FindByLabel("x0");
+                JSONElement y0 = pairChild.FindByLabel("y0");
+                JSONElement x1 = pairChild.FindByLabel("x1");
+                JSONElement y1 = pairChild.FindByLabel("y1");
+                if (x0 is null || y0 is null || x1 is null || y1 is null)
                 {
-                    Console.Error.WriteLine($"Failed parsing JSON: {tokenRes.Error}");
+                    Console.Error.WriteLine($"Pair by index '{pairIndex}' is missing properties at location '{pairChild.Location}'!");
                     return -1;
                 }
-                JSONToken token = tokenRes.Value;
-                //Console.WriteLine(token.ToString());
-                cur = cur.Slice(token.Length);
+                pairs[pairIndex] = new HaversinePair(x0.NumberValue, y0.NumberValue, x1.NumberValue, y1.NumberValue);
+                ++pairIndex;
+            }
+
+            ulong lookupCyclesEnd = Rdtsc.Read();
+
+            ulong sumCyclesStart = Rdtsc.Read();
+
+            double avg = 0.0;
+            double coeff = 1.0 / (double)pairs.Length;
+            foreach (var pair in pairs)
+            {
+                double distance = HaversineMath.HaversineDistance(pair.X0, pair.Y0, pair.X1, pair.Y1);
+                avg += distance * coeff;
+            }
+
+            ulong sumCyclesEnd = Rdtsc.Read();
+
+            ulong totalCyclesEnd = Rdtsc.Read();
+
+            ulong totalCyclesElapsed = totalCyclesEnd - totalCyclesStart;
+
+            ulong startupCyclesElapsed = startupCyclesEnd - startupCyclesStart;
+            ulong readCyclesElapsed = readCyclesEnd - readCyclesStart;
+            ulong parseCyclesElapsed = parseCyclesEnd - parseCyclesStart;
+            ulong lookupCyclesElapsed = lookupCyclesEnd - lookupCyclesStart;
+            ulong sumCyclesElapsed = sumCyclesEnd - sumCyclesStart;
+
+            Console.Error.WriteLine($"Input size: {inputJsonFile.Length}");
+            Console.Error.WriteLine($"Pair count: {pairCount}");
+            Console.Error.WriteLine($"Haversine sum: {avg:F16}");
+            Console.Error.WriteLine();
+
+            Console.WriteLine(FormattableString.Invariant($"Total time: {totalCyclesElapsed / (double)cpuFreq * 1000.0} ms (CPU Freq: {cpuFreq})"));
+            Console.WriteLine(FormattableString.Invariant($"\tStartup: {startupCyclesElapsed} ({(startupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            Console.WriteLine(FormattableString.Invariant($"\tRead: {readCyclesElapsed} ({(readCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            Console.WriteLine(FormattableString.Invariant($"\tParse: {parseCyclesElapsed} ({(parseCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            Console.WriteLine(FormattableString.Invariant($"\tLookup: {lookupCyclesElapsed} ({(lookupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            Console.WriteLine(FormattableString.Invariant($"\tSum: {sumCyclesElapsed} ({(sumCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+
+            if (expectedAvg > 0)
+            {
+                double delta = Math.Abs(expectedAvg - avg);
+                if (delta > 0.0001)
+                {
+                    Console.Error.WriteLine(FormattableString.Invariant($"Expect haversine avg of '{expectedAvg:F16}', but got '{avg:F16}'. Delta is '{delta:F16}'"));
+                    return -1;
+                }
             }
 
             return 0;
