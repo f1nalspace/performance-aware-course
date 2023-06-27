@@ -7,34 +7,6 @@ namespace Final.PerformanceAwareCourse
 {
     internal class Program
     {
-        const double Deg2RadFactor = Math.PI / 180.0;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static double RadiansFromDegrees(double degrees) => degrees * Deg2RadFactor;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        static double Square(double value) => value * value;
-
-        static double HaversineDistance(double x0, double y0, double x1, double y1, double radius)
-        {
-            double lat1 = y0;
-            double lat2 = y1;
-            double lon1 = x0;
-            double lon2 = x1;
-
-            double dLat = RadiansFromDegrees(lat2 - lat1);
-            double dLon = RadiansFromDegrees(lon2 - lon1);
-            lat1 = RadiansFromDegrees(lat1);
-            lat2 = RadiansFromDegrees(lat2);
-
-            double a = Square(Math.Sin(dLat / 2.0)) + Square(Math.Sin(dLon / 2.0)) * Math.Cos(lat1) * Math.Cos(lat2);
-            double c = 2.0 * Math.Asin(Math.Sqrt(a));
-
-            double result = radius * c;
-
-            return result;
-        }
-
         static double RandomRange(Random rnd, double min, double max)
         {
             double t = rnd.NextDouble();
@@ -52,7 +24,6 @@ namespace Final.PerformanceAwareCourse
 
         const string ClusterMethod = "cluster";
         const string UniformMethod = "uniform";
-        const double EarthRadius = 6372.8;
 
         static int Main(string[] args)
         {
@@ -136,7 +107,7 @@ namespace Final.PerformanceAwareCourse
                 double x1 = RandomDegree(rnd, xCenter, xRadius, xRange);
                 double y1 = RandomDegree(rnd, yCenter, yRadius, yRange);
 
-                double haversineDistance = HaversineDistance(x0, y0, x1, y1, EarthRadius);
+                double haversineDistance = HaversineMath.HaversineDistance(x0, y0, x1, y1);
 
                 string separator = pairIndex < pairCount - 1 ? "," : "";
 
