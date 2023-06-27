@@ -5,7 +5,9 @@ VisualStudioVersion = 17.5.33516.290
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "HaversineGenerator", "HaversineGenerator\HaversineGenerator.csproj", "{9F1BFF1A-22E2-4AFB-ADEF-132DD8F743DA}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HaversineLoader", "HaversineLoader\HaversineLoader.csproj", "{10C55BCA-01A5-4ADD-B99C-8FA84E2DCF14}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "HaversineLoader", "HaversineLoader\HaversineLoader.csproj", "{10C55BCA-01A5-4ADD-B99C-8FA84E2DCF14}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HaversineLib", "HaversineLib\HaversineLib.csproj", "{6325030D-FF0C-4366-947D-7C7F632D536C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +23,10 @@ Global
 		{10C55BCA-01A5-4ADD-B99C-8FA84E2DCF14}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{10C55BCA-01A5-4ADD-B99C-8FA84E2DCF14}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{10C55BCA-01A5-4ADD-B99C-8FA84E2DCF14}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6325030D-FF0C-4366-947D-7C7F632D536C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6325030D-FF0C-4366-947D-7C7F632D536C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6325030D-FF0C-4366-947D-7C7F632D536C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6325030D-FF0C-4366-947D-7C7F632D536C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
