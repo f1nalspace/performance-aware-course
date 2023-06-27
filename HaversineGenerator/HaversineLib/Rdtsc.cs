@@ -167,6 +167,6 @@ namespace Final.PerformanceAwareCourse
         /// Returns the RDTSC value from the CPU.
         /// </summary>
         /// <returns>The resulting timestamp counter.</returns>
-        public static ulong Read() => Timestamp();
+        public static ulong Get() => Timestamp();
     }
 }
