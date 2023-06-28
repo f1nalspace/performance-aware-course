@@ -196,14 +196,35 @@ namespace Final.PerformanceAwareCourse
         SectionEnd,
     }
 
+    /// <summary>
+    /// Defines a location in a "tracked" section inside a code block.
+    /// </summary>
     public readonly struct ProfileLocation
     {
+        /// <summary>
+        /// Gets the optional section name.
+        /// </summary>
         public string SectionName { get; }
+        /// <summary>
+        /// Gets the name of the function/method.
+        /// </summary>
         public string FunctionName { get; }
+        /// <summary>
+        /// Gets the full file path of the source file.
+        /// </summary>
         public string FilePath { get; }
+        /// <summary>
+        /// Gets the line number of source file.
+        /// </summary>
         public int LineNumber { get; }
+        /// <summary>
+        /// Padding field
+        /// </summary>
         public int Unused { get; }
 
+        /// <summary>
+        /// Gets an identifier from all relevant fields.
+        /// </summary>
         public string Id
         {
             get
@@ -245,13 +266,34 @@ namespace Final.PerformanceAwareCourse
         public override string ToString() => Id;
     }
 
+    /// <summary>
+    /// Defines one record that stores just the record type, the raw RDTSC value, the thread id and a location.
+    /// </summary>
     public readonly struct ProfileRecord
     {
+        /// <summary>
+        /// Gets the location.
+        /// </summary>
         public ProfileLocation Location { get; }
+        /// <summary>
+        /// Gets the raw RDTSC value.
+        /// </summary>
         public ulong Cycles { get; }
+        /// <summary>
+        /// Gets the record type.
+        /// </summary>
         public RecordType Type { get; }
+        /// <summary>
+        /// Gets the thread id.
+        /// </summary>
         public int ThreadId { get; }
+        /// <summary>
+        /// First padding field.
+        /// </summary>
         public ulong Unused0 { get; }
+        /// <summary>
+        /// Second padding field.
+        /// </summary>
         public ulong Unused1 { get; }
 
         public ProfileRecord(RecordType type, ulong cycles, int threadId, ProfileLocation location)
@@ -263,30 +305,61 @@ namespace Final.PerformanceAwareCourse
             Unused0 = Unused1 = 0;
         }
 
-
-
         public override string ToString() => $"Type: {Type}, Loc: {Location}, Thread: {ThreadId}, Cycles: {Cycles}";
     }
 
+    /// <summary>
+    /// Represents one node inside a tree, that contains the children and its current delta cycles.
+    /// </summary>
     public class ProfileNode : IEquatable<ProfileNode>
     {
-        const long OneMillion = 1_000_000;
-
+        /// <summary>
+        /// Gets the parent node.
+        /// </summary>
         public ProfileNode Parent { get; }
+        /// <summary>
+        /// Gets the location.
+        /// </summary>
         public ProfileLocation Location { get; }
-        private readonly LinkedList<ProfileNode> _children;
+        /// <summary>
+        /// Gets the location id (see: <see cref="ProfileLocation.Id"/>).
+        /// </summary>
         public string Id { get; }
+        /// <summary>
+        /// Gets the current time spent in this section for all calls.
+        /// </summary>
         public TimeSpan Time { get; private set; }
+        /// <summary>
+        /// Gets the total number of cycles for all calls.
+        /// </summary>
         public ulong TotalCycles => _cycles;
+        /// <summary>
+        /// Gets the average number of cycles for one call.
+        /// </summary>
         public double AvgCycles => CallCount > 0 ? _cycles / (double)CallCount : 0;
+        /// <summary>
+        /// Gets the number of calls.
+        /// </summary>
         public ulong CallCount { get; private set; }
+        /// <summary>
+        /// Gets the thread id.
+        /// </summary>
         public int ThreadId { get; }
+
+        /// <summary>
+        /// Gets the percentage in range of 0.0 to 100.0, without clamping it.
+        /// </summary>
         public double Percentage => _percentage * 100.0;
+
+        /// <summary>
+        /// Gets the first child node in the linked list.
+        /// </summary>
+        public LinkedListNode<ProfileNode> FirstChild => _children.First;
 
         private ulong _cycles;
         private double _percentage;
 
-        public LinkedListNode<ProfileNode> FirstChild => _children.First;
+        private readonly LinkedList<ProfileNode> _children;
 
         internal ProfileNode(ProfileNode parent, ProfileLocation location, string id, int threadId)
         {
@@ -301,6 +374,11 @@ namespace Final.PerformanceAwareCourse
             ThreadId = threadId;
         }
 
+        /// <summary>
+        /// Add the specified <paramref name="deltaCycles"/> to this <see cref="ProfileNode"/>, increment the <see cref="CallCount"/> and update the <see cref="Time"/>.
+        /// </summary>
+        /// <param name="deltaCycles">The number of CPU cycles.</param>
+        /// <param name="cpuFreq">The CPU frequency, that is used to compute the <see cref="Time"/>.</param>
         public void AddCall(ulong deltaCycles, ulong cpuFreq)
         {
             _cycles += deltaCycles;
@@ -311,11 +389,19 @@ namespace Final.PerformanceAwareCourse
             Time = TimeSpan.FromSeconds(secs);
         }
 
+        /// <summary>
+        /// Adds the specified <paramref name="child"/>.
+        /// </summary>
+        /// <param name="child">The child node.</param>
         public void AddChild(ProfileNode child)
         {
             _children.AddLast(child);
         }
 
+        /// <summary>
+        /// Computes the percentage from the specified <paramref name="totalCycles"/>.
+        /// </summary>
+        /// <param name="totalCycles">The total number of cycles from the profiler run.</param>
         public void Finalize(ulong totalCycles)
         {
             _percentage = TotalCycles / (double)totalCycles;
@@ -365,6 +451,9 @@ namespace Final.PerformanceAwareCourse
         }
     }
 
+    /// <summary>
+    /// Represents a simple struct that calls <see cref="Profiler.Begin(ProfileLocation)"/> at construction and <see cref="Profiler.End(ProfileLocation)"/> when it gets destructed.
+    /// </summary>
     public readonly struct ProfileSection : IDisposable
     {
         private readonly Profiler _profiler;
