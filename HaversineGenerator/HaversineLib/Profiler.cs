@@ -492,11 +492,52 @@ namespace Final.PerformanceAwareCourse
                 Push(RecordType.ProfilerStart, new ProfileLocation());
         }
 
+        class RecordCounter
+        {
+            public int StartCount { get; set; }
+            public int EndCount { get; set; }
+        }
+
+        private void ValidateRecords(ProfileRecord[] records, ulong count)
+        {
+            Dictionary<string, RecordCounter> recordsMappedById = new Dictionary<string, RecordCounter>();
+
+            for (ulong recordIndex = 0; recordIndex < count; ++recordIndex)
+            {
+                ProfileRecord record = records[recordIndex];
+                string id = record.Location.Id;
+
+                if (!recordsMappedById.TryGetValue(id, out RecordCounter recordCounter))
+                {
+                    recordCounter = new RecordCounter();
+                    recordsMappedById.Add(id, recordCounter);
+                }
+
+                switch (record.Type)
+                {
+                    case RecordType.SectionBegin:
+                        recordCounter.StartCount++;
+                        break;
+
+                    case RecordType.SectionEnd:
+                        recordCounter.EndCount++;
+                        break;
+                }
+            }
+
+            foreach (var pair in recordsMappedById)
+            {
+                if (pair.Value.StartCount != pair.Value.EndCount)
+                    throw new InvalidOperationException($"The records with '{pair.Key}' are not properly recorded by an {RecordType.SectionBegin} and {RecordType.SectionEnd}");
+            }
+        }
+
         public ProfilerResult StopAndCollect(string pathTrim = null)
         {
             if (Interlocked.CompareExchange(ref _active, 0, 1) == 1)
             {
                 Push(RecordType.ProfilerEnd, new ProfileLocation());
+
 
                 Dictionary<string, ProfileNode> _nodeMap = new Dictionary<string, ProfileNode>();
                 List<ProfileNode> nodes = new List<ProfileNode>();
@@ -507,6 +548,9 @@ namespace Final.PerformanceAwareCourse
                 Stack<(ProfileNode, ulong)> nodeStack = new Stack<(ProfileNode, ulong)>();
 
                 ulong recordCount = (ulong)_recordIndex;
+
+                ValidateRecords(_records, recordCount);
+
                 for (ulong recordIndex = 0; recordIndex < recordCount; ++recordIndex)
                 {
                     ProfileRecord record = _records[recordIndex];
