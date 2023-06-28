@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -9,8 +8,10 @@ namespace Final.PerformanceAwareCourse
     public enum ProfileType : int
     {
         None = 0,
-        Begin,
-        End
+        Start,
+        End,
+        SectionBegin,
+        SectionEnd,
     }
 
     public readonly struct ProfileLocation
@@ -88,35 +89,31 @@ namespace Final.PerformanceAwareCourse
 
     public class Profiler
     {
-        public const long MaxRecordCount = 4096 * 1024;
-
         private readonly ProfileRecord[] _records;
+        private readonly ulong _cpuFreq;
+        private readonly long _maxRecordCount;
         private long _recordIndex;
-        private ulong _cpuFreq;
         private long _active;
 
-        public Profiler()
+        public Profiler(ulong maxRecordCount = 4096 * 1024)
         {
-            _records = new ProfileRecord[MaxRecordCount];
+            _cpuFreq = Rdtsc.EstimateFrequency();
+            _records = new ProfileRecord[maxRecordCount];
+            _maxRecordCount = (long)maxRecordCount;
             _recordIndex = 0;
             _active = 1;
-            _cpuFreq = Rdtsc.EstimateFrequency();
         }
 
         public void Start()
         {
             if (Interlocked.CompareExchange(ref _active, 1, 0) == 0)
-            {
-
-            }
+                Push(ProfileType.Start, new ProfileLocation());
         }
 
         public void StopAndCollect()
         {
             if (Interlocked.CompareExchange(ref _active, 0, 1) == 1)
-            {
-
-            }
+                Push(ProfileType.End, new ProfileLocation());
         }
 
         private void Push(ProfileType type, ProfileLocation location)
@@ -124,7 +121,7 @@ namespace Final.PerformanceAwareCourse
             int threadId = Thread.CurrentThread.ManagedThreadId;
 
             long index = Interlocked.Increment(ref _recordIndex) - 1;
-            Debug.Assert(index < MaxRecordCount);
+            Debug.Assert(index < _maxRecordCount);
 
             ulong cycles = Rdtsc.Get();
             _records[index] = new ProfileRecord(type, cycles, threadId, location);
@@ -132,29 +129,34 @@ namespace Final.PerformanceAwareCourse
 
         public void Begin(string sectionName = null, [CallerMemberName] string functionName = null, [CallerFilePath] string filePath = null, [CallerLineNumber] int lineNumber = 0)
         {
-            if (_active == 0) return;
-            Push(ProfileType.Begin, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
+            if (_active == 0) 
+                return;
+            Push(ProfileType.SectionBegin, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
         }
         internal void Begin(ProfileLocation location)
         {
-            if (_active == 0) return;
-            Push(ProfileType.Begin, location);
+            if (_active == 0) 
+                return;
+            Push(ProfileType.SectionBegin, location);
         }
 
         public void End(string sectionName = null, [CallerMemberName] string functionName = null, [CallerFilePath] string filePath = null, [CallerLineNumber] int lineNumber = 0)
         {
-            if (_active == 0) return;
-            Push(ProfileType.End, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
+            if (_active == 0) 
+                return;
+            Push(ProfileType.SectionEnd, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
         }
         internal void End(ProfileLocation location)
         {
-            if (_active == 0) return;
-            Push(ProfileType.End, location);
+            if (_active == 0) 
+                return;
+            Push(ProfileType.SectionEnd, location);
         }
 
         public IDisposable Section(string sectionName = null, [CallerMemberName] string functionName = null, [CallerFilePath] string filePath = null, [CallerLineNumber] int lineNumber = 0)
         {
-            if (_active == 0) return null;
+            if (_active == 0) 
+                return null;
             return new ProfileSection(this, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
         }
     }
