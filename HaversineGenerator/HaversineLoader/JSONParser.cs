@@ -195,6 +195,18 @@ namespace Final.PerformanceAwareCourse
 
     public class JSONParser
     {
+        private readonly Profiler _profiler;
+
+        public JSONParser(Profiler profiler)
+        {
+            _profiler = profiler;
+        }
+
+        static readonly Error EndOfStreamError = new Error("End of stream");
+
+        static readonly byte[] FalseKeyword = { (byte)'f', (byte)'a', (byte)'l', (byte)'s', (byte)'e' };
+        static readonly byte[] TrueKeyword = { (byte)'t', (byte)'r', (byte)'u', (byte)'e' };
+        static readonly byte[] NullKeyword = { (byte)'n', (byte)'u', (byte)'l', (byte)'l' };
 
         static bool StreamHasData(ReadOnlySpan<byte> stream, int minLen = 1) => stream.Length >= minLen;
 
@@ -268,9 +280,7 @@ namespace Final.PerformanceAwareCourse
             stream = cur;
         }
 
-        static readonly Error EndOfStreamError = new Error("End of stream");
-
-        static Result<JSONToken> GetNumberToken(JSONLocation location, ReadOnlySpan<byte> stream, bool hasSign)
+        private Result<JSONToken> GetNumberToken(JSONLocation location, ReadOnlySpan<byte> stream, bool hasSign)
         {
             if (!StreamHasData(stream))
                 return EndOfStreamError;
@@ -327,7 +337,7 @@ namespace Final.PerformanceAwareCourse
             return new JSONToken(kind, location, end, numberLiteral) { Text = GetText(stream, location, end) };
         }
 
-        static Result<JSONToken> GetStringToken(JSONLocation location, ReadOnlySpan<byte> stream)
+        private Result<JSONToken> GetStringToken(JSONLocation location, ReadOnlySpan<byte> stream)
         {
             if (!StreamHasData(stream))
                 return EndOfStreamError;
@@ -373,7 +383,7 @@ namespace Final.PerformanceAwareCourse
             return new JSONToken(JSONTokenKind.StringLiteral, location, end, s.ToString()) { Text = GetText(stream, location, end) };
         }
 
-        static bool BufferEquals(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
+        private bool BufferEquals(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
         {
             if (a.Length != b.Length)
                 return false;
@@ -383,7 +393,7 @@ namespace Final.PerformanceAwareCourse
             return true;
         }
 
-        static Result<JSONToken> GetKeywordToken(JSONLocation location, ReadOnlySpan<byte> stream, ReadOnlySpan<byte> keyword, JSONTokenKind kind)
+        private Result<JSONToken> GetKeywordToken(JSONLocation location, ReadOnlySpan<byte> stream, ReadOnlySpan<byte> keyword, JSONTokenKind kind)
         {
             if (!StreamHasData(stream))
                 return EndOfStreamError;
@@ -399,11 +409,7 @@ namespace Final.PerformanceAwareCourse
             return new Error($"Expect keyword token '{expectString}', but got '{actual}' at location '{location}'");
         }
 
-        static readonly byte[] FalseKeyword = { (byte)'f', (byte)'a', (byte)'l', (byte)'s', (byte)'e' };
-        static readonly byte[] TrueKeyword = { (byte)'t', (byte)'r', (byte)'u', (byte)'e' };
-        static readonly byte[] NullKeyword = { (byte)'n', (byte)'u', (byte)'l', (byte)'l' };
-
-        static Result<JSONToken> GetToken(ref JSONLocation location, ref ReadOnlySpan<byte> stream)
+        private Result<JSONToken> GetToken(ref JSONLocation location, ref ReadOnlySpan<byte> stream)
         {
             if (!StreamHasData(stream))
                 return EndOfStreamError;
@@ -453,8 +459,10 @@ namespace Final.PerformanceAwareCourse
             }
         }
 
-        static Result<JSONElement> ParseElement(string label, ref JSONLocation location, ref ReadOnlySpan<byte> stream)
+        private Result<JSONElement> ParseElement(string label, ref JSONLocation location, ref ReadOnlySpan<byte> stream)
         {
+            using var _ = _profiler.Section();
+
             SkipWhitespaces(ref location, ref stream);
 
             Result<JSONToken> tokenRes = GetToken(ref location, ref stream);
@@ -508,7 +516,7 @@ namespace Final.PerformanceAwareCourse
 
         }
 
-        static Result<JSONElement> ParseList(string label, JSONLocation start, ref JSONLocation location, ref ReadOnlySpan<byte> stream, JSONElementKind kind, JSONTokenKind endToken, bool requireKeys)
+        private Result<JSONElement> ParseList(string label, JSONLocation start, ref JSONLocation location, ref ReadOnlySpan<byte> stream, JSONElementKind kind, JSONTokenKind endToken, bool requireKeys)
         {
             JSONElement list = new JSONElement(kind, start, label);
 
@@ -581,7 +589,7 @@ namespace Final.PerformanceAwareCourse
             return list;
         }
 
-        public static Result<JSONElement> Parse(ReadOnlySpan<byte> stream)
+        public Result<JSONElement> Parse(ReadOnlySpan<byte> stream)
         {
             if (!StreamHasData(stream))
                 return EndOfStreamError;

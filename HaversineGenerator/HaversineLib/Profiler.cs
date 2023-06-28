@@ -251,24 +251,27 @@ namespace Final.PerformanceAwareCourse
             Unused0 = Unused1 = 0;
         }
 
-        
+
 
         public override string ToString() => $"Type: {Type}, Loc: {Location}, Thread: {ThreadId}, Cycles: {Cycles}";
     }
 
     public class ProfileNode : IEquatable<ProfileNode>
     {
+        const long OneMillion = 1_000_000;
+
         public ProfileNode Parent { get; }
         public ProfileLocation Location { get; }
         private readonly LinkedList<ProfileNode> _children;
         public string Id { get; }
         public TimeSpan Time { get; private set; }
-        public long Cycles => _cycles > 0 ? _cycles : 0;
-        public int CallCount { get; private set; }
+        public ulong TotalCycles => _cycles;
+        public double AvgCycles => CallCount > 0 ? _cycles / (double)CallCount : 0;
+        public ulong CallCount { get; private set; }
         public int ThreadId { get; }
         public double Percentage => _percentage * 100.0;
 
-        private long _cycles;
+        private ulong _cycles;
         private double _percentage;
 
         public LinkedListNode<ProfileNode> FirstChild => _children.First;
@@ -286,15 +289,13 @@ namespace Final.PerformanceAwareCourse
             ThreadId = threadId;
         }
 
-        public void AddCall(ulong cycles, ulong cpuFreq)
+        public void AddCall(ulong deltaCycles, ulong cpuFreq)
         {
-            if (_cycles == 0)
-                _cycles -= (long)cycles;
-            else
-                _cycles += (long)cycles;
+            _cycles += deltaCycles;
+
             ++CallCount;
 
-            double secs = Cycles / (double)cpuFreq;
+            double secs = _cycles / (double)cpuFreq;
             Time = TimeSpan.FromSeconds(secs);
         }
 
@@ -305,14 +306,14 @@ namespace Final.PerformanceAwareCourse
 
         public void Finalize(ulong totalCycles)
         {
-            _percentage = _cycles / (double)totalCycles;
+            _percentage = TotalCycles / (double)totalCycles;
         }
 
         public bool Equals(ProfileNode other) => other != null && string.Equals(Id, other.Id);
         public override bool Equals(object obj) => obj is ProfileNode node && Equals(node);
         public override int GetHashCode() => Id.GetHashCode();
 
-        public override string ToString() => FormattableString.Invariant($"{Id} => {Cycles} cycles, {Time.TotalMilliseconds:F5} ms [{Percentage:F2} %]");
+        public override string ToString() => FormattableString.Invariant($"{Id} => {CallCount} calls, {TotalCycles:n0} total cycles, {AvgCycles:n} avg cycles, {Time.TotalMilliseconds:F5} ms [{Percentage:F2} %]");
     }
 
     public class ProfilerResult
@@ -340,10 +341,16 @@ namespace Final.PerformanceAwareCourse
             {
                 Print(ident, n.Value);
                 n = n.Next;
-            } 
+            }
         }
 
-        public void Print() => Print(0, Root);
+        public void PrintTree() => Print(0, Root);
+
+        public void PrintList()
+        {
+            foreach (ProfileNode node in List)
+                Console.WriteLine(node.ToString());
+        }
     }
 
     public readonly struct ProfileSection : IDisposable
@@ -378,8 +385,6 @@ namespace Final.PerformanceAwareCourse
             _active = 0;
         }
 
-
-
         public void Start()
         {
             if (Interlocked.CompareExchange(ref _active, 1, 0) == 0)
@@ -398,7 +403,7 @@ namespace Final.PerformanceAwareCourse
                 ProfileNode root = new ProfileNode(null, new ProfileLocation(), "ROOT", 0);
                 nodes.Add(root);
 
-                ProfileNode cur = null;
+                Stack<(ProfileNode, ulong)> nodeStack = new Stack<(ProfileNode, ulong)>();
 
                 ulong recordCount = (ulong)_recordIndex;
                 for (ulong recordIndex = 0; recordIndex < recordCount; ++recordIndex)
@@ -410,42 +415,78 @@ namespace Final.PerformanceAwareCourse
                         record = new ProfileRecord(record.Type, record.Cycles, record.ThreadId, record.Location.TrimPath(pathTrim));
 
                     string id = record.Location.Id;
+
                     bool isFinished = false;
                     switch (record.Type)
                     {
                         case ProfileType.ProfilerStart:
-                            root.AddCall(record.Cycles, _cpuFreq);
-                            cur = root;
-                            break;
+                        {
+                            // Simply push the root and its cycles into to the stack
+                            nodeStack.Push((root, record.Cycles));
+                        }
+                        break;
+
                         case ProfileType.ProfilerEnd:
-                            root.AddCall(record.Cycles, _cpuFreq);
-                            cur = null;
+                        {
+                            // Remove the root node from the stack
+                            (ProfileNode, ulong) cur = nodeStack.Pop();
+                            Debug.Assert(ReferenceEquals(cur.Item1, root));
+                            Debug.Assert(nodeStack.Count == 0);
+
+                            // Get delta cycles
+                            Debug.Assert(record.Cycles >= cur.Item2);
+                            ulong delta = record.Cycles - cur.Item2;
+
+                            // Add the delta cycles to the root
+                            root.AddCall(delta, _cpuFreq);
+
+                            // Do not process and records anymore
                             isFinished = true;
-                            break;
+
+                        }
+                        break;
+
                         case ProfileType.SectionBegin:
+                        {
+                            // We need at least the root node to put the node into
+                            if (!nodeStack.TryPeek(out (ProfileNode, ulong) cur))
+                                throw new InvalidOperationException($"Node stack empty!");
+
+                            ProfileNode topNode = cur.Item1;
+
+                            // Get or add section node to the top node
+                            if (!_nodeMap.TryGetValue(id, out ProfileNode node))
                             {
-                                Debug.Assert(cur is not null);
-                                if (!_nodeMap.TryGetValue(id, out ProfileNode node))
-                                {
-                                    node = new ProfileNode(cur, record.Location, id, record.ThreadId);
-                                    _nodeMap.Add(id, node);
-                                    nodes.Add(node);
-                                }
-                                cur.AddChild(node);
-                                node.AddCall(record.Cycles, _cpuFreq);
-                                cur = node;
+                                node = new ProfileNode(topNode, record.Location, id, record.ThreadId);
+                                _nodeMap.Add(id, node);
+                                nodes.Add(node);
+                                topNode.AddChild(node);
                             }
-                            break;
+
+                            // Push the new or existing node to the stack
+                            nodeStack.Push((node, record.Cycles));
+                        }
+                        break;
+
                         case ProfileType.SectionEnd:
-                            {
-                                Debug.Assert(cur is not null);
-                                if (!_nodeMap.TryGetValue(id, out ProfileNode node))
-                                    throw new InvalidOperationException($"The profile node by id '{id}' was not opened!");
-                                Debug.Assert(string.Equals(cur.Id, id));
-                                cur.AddCall(record.Cycles, _cpuFreq);
-                                cur = cur.Parent;
-                            }
-                            break;
+                        {
+                            // Pop top node from the stack
+                            if (!nodeStack.TryPop(out (ProfileNode, ulong) cur))
+                                throw new InvalidOperationException($"Node stack empty!");
+
+                            ProfileNode topNode = cur.Item1;
+
+                            Debug.Assert(topNode.Id.Equals(id), $"Expect ID '{id}', but got '{topNode.Id}'");
+
+                            // Get delta cycles
+                            Debug.Assert(record.Cycles >= cur.Item2, $"Expect record cycles '{record.Cycles}' to be greater than the section cycles '{cur.Item2}'");
+                            ulong delta = record.Cycles - cur.Item2;
+
+                            // Add the delta cycles to the node
+                            topNode.AddCall(delta, _cpuFreq);
+                        }
+                        break;
+
                         default:
                             throw new NotSupportedException($"The profile record type '{record.Type}' not supported");
                     }
@@ -453,10 +494,11 @@ namespace Final.PerformanceAwareCourse
                         break;
                 }
 
-                ulong totalCycles = (ulong)root.Cycles;
+                // Compute percentage of all nodes from the total cycles of the root
+                ulong totalCycles = root.TotalCycles;
                 foreach (ProfileNode node in nodes)
                 {
-                    Debug.Assert((ulong)node.Cycles <= totalCycles);
+                    Debug.Assert(node.TotalCycles <= totalCycles);
                     node.Finalize(totalCycles);
                 }
 

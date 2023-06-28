@@ -8,7 +8,7 @@ namespace Final.PerformanceAwareCourse
 {
     internal class Program
     {
-        const int FileBufferSize = 4096 * 16;
+        const int FileBufferSize = 4096 * 256;
 
         static int Run(string[] args, [CallerFilePath] string classNameFilePath = null)
         {
@@ -65,7 +65,8 @@ namespace Final.PerformanceAwareCourse
             using (var _ = profiler.Section("Parse JSON"))
             {
                 ReadOnlySpan<byte> data = jsonData.AsSpan();
-                parseRes = JSONParser.Parse(data);
+                var parser = new JSONParser(profiler);
+                parseRes = parser.Parse(data);
                 if (!parseRes.Success)
                 {
                     Console.Error.WriteLine(parseRes.Error.Message);
@@ -76,6 +77,7 @@ namespace Final.PerformanceAwareCourse
             HaversinePair[] pairs;
             int pairCount;
             double expectedAvg = 0;
+            long expectedCount = 0;
             using (var _ = profiler.Section("Lookup Haversine Pairs"))
             {
                 JSONElement root = parseRes.Value;
@@ -96,16 +98,10 @@ namespace Final.PerformanceAwareCourse
                 if (avgNode is not null && avgNode.Kind == JSONElementKind.Number)
                     expectedAvg = avgNode.NumberValue;
 
-                long expectedCount = 0;
+                expectedCount = 0;
                 JSONElement countNode = root.FindByLabel("count");
                 if (countNode is not null && countNode.Kind == JSONElementKind.Number)
                     expectedCount = (long)countNode.NumberValue;
-
-                if (expectedCount != pairsNode.ChildCount)
-                {
-                    Console.Error.WriteLine(FormattableString.Invariant($"Expect pair count of '{expectedCount}', but got '{pairsNode.ChildCount}'"));
-                    return -1;
-                }
 
                 pairCount = pairsNode.ChildCount;
 
@@ -132,8 +128,8 @@ namespace Final.PerformanceAwareCourse
             using (var _ = profiler.Section("Compute Haversine Avg"))
             {
                 avg = 0.0;
-                double coeff = 1.0 / (double)pairs.Length;
-                foreach (var pair in pairs)
+                double coeff = 1.0 / (double)pairCount;
+                foreach (HaversinePair pair in pairs)
                 {
                     double distance = HaversineMath.HaversineDistance(pair.X0, pair.Y0, pair.X1, pair.Y1);
                     avg += distance * coeff;
@@ -150,7 +146,19 @@ namespace Final.PerformanceAwareCourse
             Console.WriteLine($"Total time: {profilerResult.Root.Time.TotalMilliseconds:F5} ms");
             Console.WriteLine();
 
-            profilerResult.Print();
+            profilerResult.PrintTree();
+
+            Console.WriteLine();
+
+            profilerResult.PrintList();
+
+            Console.WriteLine();
+
+            if (expectedCount != pairCount)
+            {
+                Console.Error.WriteLine(FormattableString.Invariant($"Expect pair count of '{expectedCount}', but got '{pairCount}'"));
+                return -1;
+            }
 
             if (expectedAvg > 0)
             {
