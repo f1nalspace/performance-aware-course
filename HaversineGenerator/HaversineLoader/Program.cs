@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Final.PerformanceAwareCourse
@@ -9,23 +10,20 @@ namespace Final.PerformanceAwareCourse
     {
         const int FileBufferSize = 4096 * 16;
 
-        static int Main(string[] args)
+        static int Run(string[] args, [CallerFilePath] string classNameFilePath = null)
         {
-            int locationSize = Marshal.SizeOf<ProfileLocation>();
-            int recordSize = Marshal.SizeOf<ProfileRecord>();
-
-            Debug.Assert(locationSize == 32);
-            Debug.Assert(recordSize == 64);
-
             Profiler profiler = new Profiler();
             profiler.Start();
 
-            profiler.Begin("Total");
+            profiler.Begin(out ProfileLocation totalLocation, "Total");
 
+            string classNameFolderPath;
             string inputJsonFilePath;
             FileInfo inputJsonFile;
             using (var _ = profiler.Section("Get Arguments"))
             {
+                classNameFolderPath = Path.GetDirectoryName(classNameFilePath) + Path.DirectorySeparatorChar;
+
                 if (args.Length < 1)
                 {
                     string execPath = Path.GetFileName(Environment.ProcessPath);
@@ -46,8 +44,6 @@ namespace Final.PerformanceAwareCourse
             byte[] jsonData;
             using (var _ = profiler.Section("Read File"))
             {
-                ulong readCyclesStart = Rdtsc.Get();
-
                 jsonData = new byte[inputJsonFile.Length];
 
                 int remainingBytes = (int)inputJsonFile.Length;
@@ -65,11 +61,10 @@ namespace Final.PerformanceAwareCourse
                 }
             }
 
-            ReadOnlySpan<byte> data = jsonData.AsSpan();
-
             Result<JSONElement> parseRes;
             using (var _ = profiler.Section("Parse JSON"))
             {
+                ReadOnlySpan<byte> data = jsonData.AsSpan();
                 parseRes = JSONParser.Parse(data);
                 if (!parseRes.Success)
                 {
@@ -81,7 +76,7 @@ namespace Final.PerformanceAwareCourse
             HaversinePair[] pairs;
             int pairCount;
             double expectedAvg = 0;
-            using (var _ = profiler.Section("Parse JSON"))
+            using (var _ = profiler.Section("Lookup Haversine Pairs"))
             {
                 JSONElement root = parseRes.Value;
                 if (root.Kind != JSONElementKind.Object)
@@ -145,21 +140,17 @@ namespace Final.PerformanceAwareCourse
                 }
             }
 
-            profiler.End("Total");
+            profiler.End(totalLocation);
 
-            profiler.StopAndCollect();
+            ProfilerResult profilerResult = profiler.StopAndCollect(classNameFolderPath);
 
-            Console.Error.WriteLine($"Input size: {inputJsonFile.Length}");
-            Console.Error.WriteLine($"Pair count: {pairCount}");
-            Console.Error.WriteLine($"Haversine sum: {avg:F16}");
-            Console.Error.WriteLine();
+            Console.WriteLine($"Input size: {inputJsonFile.Length}");
+            Console.WriteLine($"Pair count: {pairCount}");
+            Console.WriteLine($"Haversine sum: {avg:F16}");
+            Console.WriteLine($"Total time: {profilerResult.Root.Time.TotalMilliseconds:F5} ms");
+            Console.WriteLine();
 
-            //Console.WriteLine(FormattableString.Invariant($"Total time: {totalCyclesElapsed / (double)cpuFreq * 1000.0} ms (CPU Freq: {cpuFreq})"));
-            //Console.WriteLine(FormattableString.Invariant($"\tStartup: {startupCyclesElapsed} ({(startupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            //Console.WriteLine(FormattableString.Invariant($"\tRead: {readCyclesElapsed} ({(readCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            //Console.WriteLine(FormattableString.Invariant($"\tParse: {parseCyclesElapsed} ({(parseCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            //Console.WriteLine(FormattableString.Invariant($"\tLookup: {lookupCyclesElapsed} ({(lookupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            //Console.WriteLine(FormattableString.Invariant($"\tSum: {sumCyclesElapsed} ({(sumCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            profilerResult.Print();
 
             if (expectedAvg > 0)
             {
@@ -172,6 +163,15 @@ namespace Final.PerformanceAwareCourse
             }
 
             return 0;
+        }
+
+        static int Main(string[] args)
+        {
+            int locationSize = Marshal.SizeOf<ProfileLocation>();
+            int recordSize = Marshal.SizeOf<ProfileRecord>();
+            Debug.Assert(locationSize == 32);
+            Debug.Assert(recordSize == 64);
+            return Run(args);
         }
     }
 }

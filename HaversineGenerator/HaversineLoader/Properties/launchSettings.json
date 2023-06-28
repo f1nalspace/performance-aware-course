@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "HaversineLoader": {
+      "commandName": "Project",
+      "commandLineArgs": "\"$(USERPROFILE)\\Downloads\\HaversineOutput\\data_100000.json\""
+    }
+  }
+}
