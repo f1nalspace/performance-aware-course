@@ -175,12 +175,24 @@ namespace Final.PerformanceAwareCourse
         public static ulong Get() => Timestamp();
     }
 
-    public enum ProfileType : int
+    public enum RecordType : int
     {
         None = 0,
+        /// <summary>
+        /// The first record that is recorded by the profiler
+        /// </summary>
         ProfilerStart,
+        /// <summary>
+        /// The last record that is recorded by the profiler
+        /// </summary>
         ProfilerEnd,
+        /// <summary>
+        /// Starts a section (code block)
+        /// </summary>
         SectionBegin,
+        /// <summary>
+        /// Ends a section (code block)
+        /// </summary>
         SectionEnd,
     }
 
@@ -237,12 +249,12 @@ namespace Final.PerformanceAwareCourse
     {
         public ProfileLocation Location { get; }
         public ulong Cycles { get; }
-        public ProfileType Type { get; }
+        public RecordType Type { get; }
         public int ThreadId { get; }
         public ulong Unused0 { get; }
         public ulong Unused1 { get; }
 
-        public ProfileRecord(ProfileType type, ulong cycles, int threadId, ProfileLocation location)
+        public ProfileRecord(RecordType type, ulong cycles, int threadId, ProfileLocation location)
         {
             Type = type;
             Cycles = cycles;
@@ -388,14 +400,14 @@ namespace Final.PerformanceAwareCourse
         public void Start()
         {
             if (Interlocked.CompareExchange(ref _active, 1, 0) == 0)
-                Push(ProfileType.ProfilerStart, new ProfileLocation());
+                Push(RecordType.ProfilerStart, new ProfileLocation());
         }
 
         public ProfilerResult StopAndCollect(string pathTrim = null)
         {
             if (Interlocked.CompareExchange(ref _active, 0, 1) == 1)
             {
-                Push(ProfileType.ProfilerEnd, new ProfileLocation());
+                Push(RecordType.ProfilerEnd, new ProfileLocation());
 
                 Dictionary<string, ProfileNode> _nodeMap = new Dictionary<string, ProfileNode>();
                 List<ProfileNode> nodes = new List<ProfileNode>();
@@ -419,14 +431,14 @@ namespace Final.PerformanceAwareCourse
                     bool isFinished = false;
                     switch (record.Type)
                     {
-                        case ProfileType.ProfilerStart:
+                        case RecordType.ProfilerStart:
                         {
                             // Simply push the root and its cycles into to the stack
                             nodeStack.Push((root, record.Cycles));
                         }
                         break;
 
-                        case ProfileType.ProfilerEnd:
+                        case RecordType.ProfilerEnd:
                         {
                             // Remove the root node from the stack
                             (ProfileNode, ulong) cur = nodeStack.Pop();
@@ -446,7 +458,7 @@ namespace Final.PerformanceAwareCourse
                         }
                         break;
 
-                        case ProfileType.SectionBegin:
+                        case RecordType.SectionBegin:
                         {
                             // We need at least the root node to put the node into
                             if (!nodeStack.TryPeek(out (ProfileNode, ulong) cur))
@@ -468,7 +480,7 @@ namespace Final.PerformanceAwareCourse
                         }
                         break;
 
-                        case ProfileType.SectionEnd:
+                        case RecordType.SectionEnd:
                         {
                             // Pop top node from the stack
                             if (!nodeStack.TryPop(out (ProfileNode, ulong) cur))
@@ -509,7 +521,7 @@ namespace Final.PerformanceAwareCourse
             return null;
         }
 
-        private void Push(ProfileType type, ProfileLocation location)
+        private void Push(RecordType type, ProfileLocation location)
         {
             int threadId = Thread.CurrentThread.ManagedThreadId;
 
@@ -524,33 +536,33 @@ namespace Final.PerformanceAwareCourse
         {
             if (_active == 0)
                 return;
-            Push(ProfileType.SectionBegin, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
+            Push(RecordType.SectionBegin, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
         }
         public void Begin(out ProfileLocation location, string sectionName = null, [CallerMemberName] string functionName = null, [CallerFilePath] string filePath = null, [CallerLineNumber] int lineNumber = 0)
         {
             location = new ProfileLocation(sectionName, functionName, filePath, lineNumber);
             if (_active == 0)
                 return;
-            Push(ProfileType.SectionBegin, location);
+            Push(RecordType.SectionBegin, location);
         }
         internal void Begin(ProfileLocation location)
         {
             if (_active == 0)
                 return;
-            Push(ProfileType.SectionBegin, location);
+            Push(RecordType.SectionBegin, location);
         }
 
         public void End(string sectionName = null, [CallerMemberName] string functionName = null, [CallerFilePath] string filePath = null, [CallerLineNumber] int lineNumber = 0)
         {
             if (_active == 0)
                 return;
-            Push(ProfileType.SectionEnd, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
+            Push(RecordType.SectionEnd, new ProfileLocation(sectionName, functionName, filePath, lineNumber));
         }
         public void End(ProfileLocation location)
         {
             if (_active == 0)
                 return;
-            Push(ProfileType.SectionEnd, location);
+            Push(RecordType.SectionEnd, location);
         }
 
         public IDisposable Section(string sectionName = null, [CallerMemberName] string functionName = null, [CallerFilePath] string filePath = null, [CallerLineNumber] int lineNumber = 0)
