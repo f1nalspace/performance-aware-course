@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 
 namespace Final.PerformanceAwareCourse
 {
@@ -9,150 +11,155 @@ namespace Final.PerformanceAwareCourse
 
         static int Main(string[] args)
         {
-            ulong startupCyclesStart = Rdtsc.Get();
+            int locationSize = Marshal.SizeOf<ProfileLocation>();
+            int recordSize = Marshal.SizeOf<ProfileRecord>();
 
-            if (args.Length < 1)
+            Debug.Assert(locationSize == 32);
+            Debug.Assert(recordSize == 64);
+
+            Profiler profiler = new Profiler();
+            profiler.Start();
+
+            profiler.Begin("Total");
+
+            string inputJsonFilePath;
+            FileInfo inputJsonFile;
+            using (var _ = profiler.Section("Get Arguments"))
             {
-                string execPath = Path.GetFileName(Environment.ProcessPath);
-                Console.Error.WriteLine($"Usage: {execPath} [input json file]");
-                return -1;
-            }
-
-            string inputJsonFilePath = args[0];
-            if (!File.Exists(inputJsonFilePath))
-            {
-                Console.Error.WriteLine($"Input JSON file '{inputJsonFilePath}' does not exists!");
-                return -1;
-            }
-
-            ulong startupCyclesEnd = Rdtsc.Get();
-
-            ulong cpuFreq = Rdtsc.EstimateFrequency();
-
-            ulong totalCyclesStart = Rdtsc.Get();
-
-            ulong readCyclesStart = Rdtsc.Get();
-
-            FileInfo inputJsonFile = new FileInfo(inputJsonFilePath);
-
-            byte[] jsonData = new byte[inputJsonFile.Length];
-
-            int remainingBytes = (int)inputJsonFile.Length;
-            int offset = 0;
-
-            using (var stream = File.OpenRead(inputJsonFilePath))
-            {
-                while (remainingBytes > 0)
+                if (args.Length < 1)
                 {
-                    int bytesToRead = Math.Min(remainingBytes, FileBufferSize);
-                    int bytesRead = stream.Read(jsonData, offset, bytesToRead);
-                    remainingBytes -= bytesRead;
-                    offset += bytesRead;
+                    string execPath = Path.GetFileName(Environment.ProcessPath);
+                    Console.Error.WriteLine($"Usage: {execPath} [input json file]");
+                    return -1;
+                }
+
+                inputJsonFilePath = args[0];
+                if (!File.Exists(inputJsonFilePath))
+                {
+                    Console.Error.WriteLine($"Input JSON file '{inputJsonFilePath}' does not exists!");
+                    return -1;
+                }
+
+                inputJsonFile = new FileInfo(inputJsonFilePath);
+            }
+
+            byte[] jsonData;
+            using (var _ = profiler.Section("Read File"))
+            {
+                ulong readCyclesStart = Rdtsc.Get();
+
+                jsonData = new byte[inputJsonFile.Length];
+
+                int remainingBytes = (int)inputJsonFile.Length;
+                int offset = 0;
+
+                using (var stream = File.OpenRead(inputJsonFilePath))
+                {
+                    while (remainingBytes > 0)
+                    {
+                        int bytesToRead = Math.Min(remainingBytes, FileBufferSize);
+                        int bytesRead = stream.Read(jsonData, offset, bytesToRead);
+                        remainingBytes -= bytesRead;
+                        offset += bytesRead;
+                    }
                 }
             }
 
             ReadOnlySpan<byte> data = jsonData.AsSpan();
 
-            ulong readCyclesEnd = Rdtsc.Get();
-
-            ulong parseCyclesStart = Rdtsc.Get();
-
-            Result<JSONElement> parseRes = JSONParser.Parse(data);
-            if (!parseRes.Success)
+            Result<JSONElement> parseRes;
+            using (var _ = profiler.Section("Parse JSON"))
             {
-                Console.Error.WriteLine(parseRes.Error.Message);
-                return -1;
-            }
-
-            ulong parseCyclesEnd = Rdtsc.Get();
-
-            ulong lookupCyclesStart = Rdtsc.Get();
-
-            JSONElement root = parseRes.Value;
-            if (root.Kind != JSONElementKind.Object)
-            {
-                Console.Error.WriteLine($"Expect JSON root kind to be object, but got '{root.Kind}'");
-                return -1;
-            }
-
-            JSONElement pairsNode = root.FindByLabel("pairs");
-            if (pairsNode is null || pairsNode.Kind != JSONElementKind.Array)
-            {
-                Console.Error.WriteLine($"No pairs node found!");
-                return -1;
-            }
-
-            double expectedAvg = 0;
-            JSONElement avgNode = root.FindByLabel("avg");
-            if (avgNode is not null && avgNode.Kind == JSONElementKind.Number)
-                expectedAvg = avgNode.NumberValue;
-
-            long expectedCount = 0;
-            JSONElement countNode = root.FindByLabel("count");
-            if (countNode is not null && countNode.Kind == JSONElementKind.Number)
-                expectedCount = (long)countNode.NumberValue;
-
-            if (expectedCount != pairsNode.ChildCount)
-            {
-                Console.Error.WriteLine(FormattableString.Invariant($"Expect pair count of '{expectedCount}', but got '{pairsNode.ChildCount}'"));
-                return -1;
-            }
-
-            int pairCount = pairsNode.ChildCount;
-
-            HaversinePair[] pairs = new HaversinePair[pairCount];
-
-            long pairIndex = 0;
-            foreach (JSONElement pairChild in pairsNode.Children)
-            {
-                JSONElement x0 = pairChild.FindByLabel("x0");
-                JSONElement y0 = pairChild.FindByLabel("y0");
-                JSONElement x1 = pairChild.FindByLabel("x1");
-                JSONElement y1 = pairChild.FindByLabel("y1");
-                if (x0 is null || y0 is null || x1 is null || y1 is null)
+                parseRes = JSONParser.Parse(data);
+                if (!parseRes.Success)
                 {
-                    Console.Error.WriteLine($"Pair by index '{pairIndex}' is missing properties at location '{pairChild.Location}'!");
+                    Console.Error.WriteLine(parseRes.Error.Message);
                     return -1;
                 }
-                pairs[pairIndex] = new HaversinePair(x0.NumberValue, y0.NumberValue, x1.NumberValue, y1.NumberValue);
-                ++pairIndex;
             }
 
-            ulong lookupCyclesEnd = Rdtsc.Get();
-
-            ulong sumCyclesStart = Rdtsc.Get();
-
-            double avg = 0.0;
-            double coeff = 1.0 / (double)pairs.Length;
-            foreach (var pair in pairs)
+            HaversinePair[] pairs;
+            int pairCount;
+            double expectedAvg = 0;
+            using (var _ = profiler.Section("Parse JSON"))
             {
-                double distance = HaversineMath.HaversineDistance(pair.X0, pair.Y0, pair.X1, pair.Y1);
-                avg += distance * coeff;
+                JSONElement root = parseRes.Value;
+                if (root.Kind != JSONElementKind.Object)
+                {
+                    Console.Error.WriteLine($"Expect JSON root kind to be object, but got '{root.Kind}'");
+                    return -1;
+                }
+
+                JSONElement pairsNode = root.FindByLabel("pairs");
+                if (pairsNode is null || pairsNode.Kind != JSONElementKind.Array)
+                {
+                    Console.Error.WriteLine($"No pairs node found!");
+                    return -1;
+                }
+
+                JSONElement avgNode = root.FindByLabel("avg");
+                if (avgNode is not null && avgNode.Kind == JSONElementKind.Number)
+                    expectedAvg = avgNode.NumberValue;
+
+                long expectedCount = 0;
+                JSONElement countNode = root.FindByLabel("count");
+                if (countNode is not null && countNode.Kind == JSONElementKind.Number)
+                    expectedCount = (long)countNode.NumberValue;
+
+                if (expectedCount != pairsNode.ChildCount)
+                {
+                    Console.Error.WriteLine(FormattableString.Invariant($"Expect pair count of '{expectedCount}', but got '{pairsNode.ChildCount}'"));
+                    return -1;
+                }
+
+                pairCount = pairsNode.ChildCount;
+
+                pairs = new HaversinePair[pairCount];
+
+                long pairIndex = 0;
+                foreach (JSONElement pairChild in pairsNode.Children)
+                {
+                    JSONElement x0 = pairChild.FindByLabel("x0");
+                    JSONElement y0 = pairChild.FindByLabel("y0");
+                    JSONElement x1 = pairChild.FindByLabel("x1");
+                    JSONElement y1 = pairChild.FindByLabel("y1");
+                    if (x0 is null || y0 is null || x1 is null || y1 is null)
+                    {
+                        Console.Error.WriteLine($"Pair by index '{pairIndex}' is missing properties at location '{pairChild.Location}'!");
+                        return -1;
+                    }
+                    pairs[pairIndex] = new HaversinePair(x0.NumberValue, y0.NumberValue, x1.NumberValue, y1.NumberValue);
+                    ++pairIndex;
+                }
             }
 
-            ulong sumCyclesEnd = Rdtsc.Get();
+            double avg;
+            using (var _ = profiler.Section("Compute Haversine Avg"))
+            {
+                avg = 0.0;
+                double coeff = 1.0 / (double)pairs.Length;
+                foreach (var pair in pairs)
+                {
+                    double distance = HaversineMath.HaversineDistance(pair.X0, pair.Y0, pair.X1, pair.Y1);
+                    avg += distance * coeff;
+                }
+            }
 
-            ulong totalCyclesEnd = Rdtsc.Get();
+            profiler.End("Total");
 
-            ulong totalCyclesElapsed = totalCyclesEnd - totalCyclesStart;
-
-            ulong startupCyclesElapsed = startupCyclesEnd - startupCyclesStart;
-            ulong readCyclesElapsed = readCyclesEnd - readCyclesStart;
-            ulong parseCyclesElapsed = parseCyclesEnd - parseCyclesStart;
-            ulong lookupCyclesElapsed = lookupCyclesEnd - lookupCyclesStart;
-            ulong sumCyclesElapsed = sumCyclesEnd - sumCyclesStart;
+            profiler.StopAndCollect();
 
             Console.Error.WriteLine($"Input size: {inputJsonFile.Length}");
             Console.Error.WriteLine($"Pair count: {pairCount}");
             Console.Error.WriteLine($"Haversine sum: {avg:F16}");
             Console.Error.WriteLine();
 
-            Console.WriteLine(FormattableString.Invariant($"Total time: {totalCyclesElapsed / (double)cpuFreq * 1000.0} ms (CPU Freq: {cpuFreq})"));
-            Console.WriteLine(FormattableString.Invariant($"\tStartup: {startupCyclesElapsed} ({(startupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            Console.WriteLine(FormattableString.Invariant($"\tRead: {readCyclesElapsed} ({(readCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            Console.WriteLine(FormattableString.Invariant($"\tParse: {parseCyclesElapsed} ({(parseCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            Console.WriteLine(FormattableString.Invariant($"\tLookup: {lookupCyclesElapsed} ({(lookupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
-            Console.WriteLine(FormattableString.Invariant($"\tSum: {sumCyclesElapsed} ({(sumCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            //Console.WriteLine(FormattableString.Invariant($"Total time: {totalCyclesElapsed / (double)cpuFreq * 1000.0} ms (CPU Freq: {cpuFreq})"));
+            //Console.WriteLine(FormattableString.Invariant($"\tStartup: {startupCyclesElapsed} ({(startupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            //Console.WriteLine(FormattableString.Invariant($"\tRead: {readCyclesElapsed} ({(readCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            //Console.WriteLine(FormattableString.Invariant($"\tParse: {parseCyclesElapsed} ({(parseCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            //Console.WriteLine(FormattableString.Invariant($"\tLookup: {lookupCyclesElapsed} ({(lookupCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
+            //Console.WriteLine(FormattableString.Invariant($"\tSum: {sumCyclesElapsed} ({(sumCyclesElapsed / (double)totalCyclesElapsed) * 100.0:F2} %)"));
 
             if (expectedAvg > 0)
             {
