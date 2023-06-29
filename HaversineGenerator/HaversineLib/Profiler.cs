@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security;
@@ -532,20 +533,64 @@ namespace Final.PerformanceAwareCourse
             }
         }
 
+        class Entry
+        {
+            public ProfileNode Node { get; }
+            public ulong Index { get; }
+            public ulong StartCycles { get; }
+            public ulong EndCycles { get; set; }
+
+            public ulong DeltaCycles => EndCycles - StartCycles;
+
+            public Entry(ProfileNode node, ulong index, ulong startCycles)
+            {
+                Node = node;
+                Index = index;
+                StartCycles = EndCycles = startCycles;
+            }
+
+            public override string ToString() => $"[{Index}] {Node.Id} => {DeltaCycles}";
+        }
+
+        public readonly struct StringIndex : IEquatable<StringIndex>
+        {
+            public string Id { get; }
+            public ulong Index { get; }
+
+            public StringIndex(string id, ulong index)
+            {
+                Id = id;
+                Index = index;
+            }
+
+            public bool Equals(StringIndex other) => Id == other.Id && Index == other.Index;
+            public override bool Equals([NotNullWhen(true)] object obj) => obj is StringIndex other && Equals(other);
+            public override int GetHashCode() => HashCode.Combine(Id, Index);
+
+            public static bool operator ==(StringIndex left, StringIndex right) => left.Equals(right);
+            public static bool operator !=(StringIndex left, StringIndex right) => !(left == right);
+
+            public override string ToString() => $"[{Index}] {Id}";
+        }
+
         public ProfilerResult StopAndCollect(string pathTrim = null)
         {
             if (Interlocked.CompareExchange(ref _active, 0, 1) == 1)
             {
                 Push(RecordType.ProfilerEnd, new ProfileLocation());
 
-
-                Dictionary<string, ProfileNode> _nodeMap = new Dictionary<string, ProfileNode>();
                 List<ProfileNode> nodes = new List<ProfileNode>();
 
                 ProfileNode root = new ProfileNode(null, new ProfileLocation(), "ROOT", 0);
                 nodes.Add(root);
 
-                Stack<(ProfileNode, ulong)> nodeStack = new Stack<(ProfileNode, ulong)>();
+                Dictionary<string, ulong> idIndexMap = new Dictionary<string, ulong>();
+
+                Dictionary<StringIndex, ProfileNode> stringIndexMap = new Dictionary<StringIndex, ProfileNode>();
+
+                List<Entry> entries = new List<Entry>();
+
+                Stack<Entry> stack = new Stack<Entry>();
 
                 ulong recordCount = (ulong)_recordIndex;
 
@@ -567,23 +612,25 @@ namespace Final.PerformanceAwareCourse
                         case RecordType.ProfilerStart:
                         {
                             // Simply push the root and its cycles into to the stack
-                            nodeStack.Push((root, record.Cycles));
+                            Entry entry = new Entry(root, 0, record.Cycles);
+                            entries.Add(entry);
+                            stack.Push(entry);
                         }
                         break;
 
                         case RecordType.ProfilerEnd:
                         {
                             // Remove the root node from the stack
-                            (ProfileNode, ulong) cur = nodeStack.Pop();
-                            Debug.Assert(ReferenceEquals(cur.Item1, root));
-                            Debug.Assert(nodeStack.Count == 0);
+                            Entry entry = stack.Pop();
+                            Debug.Assert(ReferenceEquals(entry.Node, root));
+                            Debug.Assert(stack.Count == 0);
 
                             // Get delta cycles
-                            Debug.Assert(record.Cycles >= cur.Item2);
-                            ulong delta = record.Cycles - cur.Item2;
+                            Debug.Assert(record.Cycles >= entry.StartCycles);
+                            entry.EndCycles = record.Cycles;
 
                             // Add the delta cycles to the root
-                            root.AddCall(delta, _cpuFreq);
+                            root.AddCall(entry.DeltaCycles, _cpuFreq);
 
                             // Do not process and records anymore
                             isFinished = true;
@@ -594,41 +641,66 @@ namespace Final.PerformanceAwareCourse
                         case RecordType.SectionBegin:
                         {
                             // We need at least the root node to put the node into
-                            if (!nodeStack.TryPeek(out (ProfileNode, ulong) cur))
+                            if (!stack.TryPeek(out Entry entry))
                                 throw new InvalidOperationException($"Node stack empty!");
 
-                            ProfileNode topNode = cur.Item1;
+                            ProfileNode topNode = entry.Node;
 
-                            // Get or add section node to the top node
-                            if (!_nodeMap.TryGetValue(id, out ProfileNode node))
+                            if (!idIndexMap.TryGetValue(id, out ulong index))
+                            {
+                                index = 0;
+                                idIndexMap.Add(id, index);
+                            }
+                            else
+                            {
+                                ++index;
+                                idIndexMap[id] = index;
+                            }
+
+                            StringIndex strIndex = new StringIndex(id, index);
+
+                            if (!stringIndexMap.TryGetValue(strIndex, out ProfileNode node))
                             {
                                 node = new ProfileNode(topNode, record.Location, id, record.ThreadId);
-                                _nodeMap.Add(id, node);
                                 nodes.Add(node);
+                                stringIndexMap.Add(strIndex, node);
                                 topNode.AddChild(node);
                             }
 
                             // Push the new or existing node to the stack
-                            nodeStack.Push((node, record.Cycles));
+                            entry = new Entry(node, index, record.Cycles);
+                            entries.Add(entry);
+                            stack.Push(entry);
                         }
                         break;
 
                         case RecordType.SectionEnd:
                         {
                             // Pop top node from the stack
-                            if (!nodeStack.TryPop(out (ProfileNode, ulong) cur))
+                            if (!stack.TryPop(out Entry entry))
                                 throw new InvalidOperationException($"Node stack empty!");
 
-                            ProfileNode topNode = cur.Item1;
+                            ProfileNode node = entry.Node;
 
-                            Debug.Assert(topNode.Id.Equals(id), $"Expect ID '{id}', but got '{topNode.Id}'");
+                            Debug.Assert(node.Id.Equals(id), $"Expect ID '{id}', but got '{node.Id}'");
 
                             // Get delta cycles
-                            Debug.Assert(record.Cycles >= cur.Item2, $"Expect record cycles '{record.Cycles}' to be greater than the section cycles '{cur.Item2}'");
-                            ulong delta = record.Cycles - cur.Item2;
+                            Debug.Assert(record.Cycles >= entry.StartCycles);
+                            entry.EndCycles = record.Cycles;
 
                             // Add the delta cycles to the node
-                            topNode.AddCall(delta, _cpuFreq);
+                            node.AddCall(entry.DeltaCycles, _cpuFreq);
+
+                            if (idIndexMap.TryGetValue(id, out ulong index))
+                            {
+                                if (index > 0)
+                                {
+                                    index--;
+                                    idIndexMap[id] = index;
+                                }
+                                else
+                                    idIndexMap.Remove(id);
+                            }
                         }
                         break;
 
@@ -639,8 +711,25 @@ namespace Final.PerformanceAwareCourse
                         break;
                 }
 
-                // Compute percentage of all nodes from the total cycles of the root
                 ulong totalCycles = root.TotalCycles;
+
+                // Validate records
+                ulong lowRecordIndex = 0;
+                ulong highRecordIndex = 0;
+                for (ulong recordIndex = 1; recordIndex < recordCount; ++recordIndex)
+                {
+                    ulong cycles = _records[recordIndex].Cycles;
+                    if (cycles > _records[highRecordIndex].Cycles)
+                        highRecordIndex = recordIndex;
+                    if (cycles < _records[lowRecordIndex].Cycles)
+                        lowRecordIndex = recordIndex;
+                }
+                ulong minCyclesCount = _records[lowRecordIndex].Cycles;
+                ulong maxCyclesCount = _records[highRecordIndex].Cycles;
+                ulong totalRecordCycles = maxCyclesCount - minCyclesCount;
+
+                // Compute percentage of all nodes from the total cycles of the root
+                Debug.Assert(totalCycles == totalRecordCycles);
                 foreach (ProfileNode node in nodes)
                 {
                     Debug.Assert(node.TotalCycles <= totalCycles);
@@ -656,7 +745,7 @@ namespace Final.PerformanceAwareCourse
 
         private void Push(RecordType type, ProfileLocation location)
         {
-            int threadId = Thread.CurrentThread.ManagedThreadId;
+            int threadId = Environment.CurrentManagedThreadId;
 
             long index = Interlocked.Increment(ref _recordIndex) - 1;
             Debug.Assert(index < _maxRecordCount);
